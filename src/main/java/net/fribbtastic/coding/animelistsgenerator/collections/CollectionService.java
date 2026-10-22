@@ -37,7 +37,7 @@ public class CollectionService {
 
     private static final String CROSSOVER_EXCEPTIONS_FILE = "crossover-exceptions.json";
     private static final Set<String> KNOWN_SOURCES = Set.of("anidb", "anilist", "animecountdown", "animenewsnetwork",
-            "anisearch", "kitsu", "livechart", "mal", "simkl");
+            "anime-planet", "anisearch", "kitsu", "livechart", "mal", "simkl");
 
     private static final Comparator<String> MIXED_ID_COMPARATOR = (a, b) -> {
         boolean aNumeric = a.matches("\\d+");
@@ -183,34 +183,55 @@ public class CollectionService {
                 connectedSets.add(copy);
             }
 
-            // Single entries related only to one crossover entry (e.g. its music videos or a
-            // recap) form one group together instead of one group each, named after it.
+            // Crossover entries linked to each other form a crossover component (e.g. the
+            // seasons of Isekai Quartet). Each component gets a group of its own, together with
+            // the single entries related only to its crossover entries (e.g. their PVs or a
+            // recap), named after its first crossover entry. A crossover entry on its own gets
+            // one only if such single entries exist.
             Map<Set<String>, String> namedAfter = new IdentityHashMap<>();
             Map<String, Set<String>> relatedCrossovers = new HashMap<>();
             crossoverNeighbours.forEach((crossover, neighbours) ->
                     neighbours.forEach(n -> relatedCrossovers.computeIfAbsent(n, k -> new HashSet<>()).add(crossover)));
-            for (String crossover : new TreeSet<>(crossoverNeighbours.keySet())) {
-                List<Integer> singles = crossoverNeighbours.get(crossover).stream()
-                        .filter(n -> setOfVertex.containsKey(n)
-                                && connectedSets.get(setOfVertex.get(n)).size() == 1
-                                && relatedCrossovers.get(n).size() == 1)
-                        .map(setOfVertex::get)
-                        .toList();
-                for (int i = 1; i < singles.size(); i++) {
-                    Set<String> single = connectedSets.get(singles.get(i));
-                    single.forEach(v -> setOfVertex.put(v, singles.getFirst()));
-                    connectedSets.get(singles.getFirst()).addAll(single);
-                    single.clear();
+            Set<String> hasOwnGroup = new HashSet<>();
+            Set<String> visited = new HashSet<>();
+            for (String start : new TreeSet<>(crossoverNeighbours.keySet())) {
+                if (!visited.add(start)) {
+                    continue;
                 }
-                if (!singles.isEmpty()) {
-                    namedAfter.put(connectedSets.get(singles.getFirst()), crossover);
+                Set<String> component = new TreeSet<>(MIXED_ID_COMPARATOR);
+                Deque<String> queue = new ArrayDeque<>(List.of(start));
+                while (!queue.isEmpty()) {
+                    String current = queue.poll();
+                    component.add(current);
+                    for (String neighbour : crossoverNeighbours.get(current)) {
+                        if (crossoverNeighbours.containsKey(neighbour) && visited.add(neighbour)) {
+                            queue.add(neighbour);
+                        }
+                    }
+                }
+                Set<String> members = new HashSet<>(component);
+                for (String crossover : component) {
+                    for (String neighbour : crossoverNeighbours.get(crossover)) {
+                        Integer setIndex = setOfVertex.get(neighbour);
+                        if (setIndex != null && connectedSets.get(setIndex).size() == 1
+                                && component.containsAll(relatedCrossovers.get(neighbour))) {
+                            members.addAll(connectedSets.get(setIndex));
+                            connectedSets.get(setIndex).clear();
+                            setOfVertex.remove(neighbour);
+                        }
+                    }
+                }
+                if (members.size() > 1) {
+                    connectedSets.add(members);
+                    namedAfter.put(members, component.iterator().next());
+                    hasOwnGroup.addAll(component);
                 }
             }
 
-            // Crossover entries are added to every group they are related to (those groups are
-            // not merged). One related only to other crossover entries gets their groups (one
-            // step, so chains of crossover entries don't spread everywhere). The rest stay
-            // together with the crossover entries they are related to, as a group of their own.
+            // Crossover entries are also added to every group they are related to (those groups
+            // are not merged). One related only to other crossover entries gets their groups (one
+            // step, so chains of crossover entries don't spread everywhere). One without any
+            // group stays on its own.
             Map<String, Set<Integer>> targets = new HashMap<>();
             for (Map.Entry<String, List<String>> crossover : crossoverNeighbours.entrySet()) {
                 Set<Integer> groups = new TreeSet<>();
@@ -233,28 +254,13 @@ public class CollectionService {
                 }
             }
             targets.putAll(inherited);
-            for (Map.Entry<String, Set<Integer>> crossover : targets.entrySet()) {
+            for (Map.Entry<String, Set<Integer>> crossover : new TreeMap<>(targets).entrySet()) {
                 for (Integer group : crossover.getValue()) {
                     connectedSets.get(group).add(crossover.getKey());
                 }
-            }
-            Set<String> placed = new HashSet<>();
-            for (String start : new TreeSet<>(targets.keySet())) {
-                if (!targets.get(start).isEmpty() || !placed.add(start)) {
-                    continue;
+                if (crossover.getValue().isEmpty() && !hasOwnGroup.contains(crossover.getKey())) {
+                    connectedSets.add(new HashSet<>(Set.of(crossover.getKey())));
                 }
-                Set<String> component = new HashSet<>();
-                Deque<String> queue = new ArrayDeque<>(List.of(start));
-                while (!queue.isEmpty()) {
-                    String current = queue.poll();
-                    component.add(current);
-                    for (String neighbour : crossoverNeighbours.get(current)) {
-                        if (targets.containsKey(neighbour) && targets.get(neighbour).isEmpty() && placed.add(neighbour)) {
-                            queue.add(neighbour);
-                        }
-                    }
-                }
-                connectedSets.add(component);
             }
             connectedSets.removeIf(Set::isEmpty);
 
