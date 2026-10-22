@@ -8,5 +8,10 @@ collection.max-degree=0
 # drop groups larger than this (0 = no limit)
 collection.max-size=300
 # tags marking crossover entries: they can't merge two franchises into one group;
-# instead they are added to every group they are related to (empty = off)
+# instead they are added to every group they are related to (empty = off).
+# TV series are not treated as crossovers (they are usually main series with crossover
+# episodes, e.g. Detective Conan), except those listed in the crossover exceptions.
 collection.crossover-tags=crossover,crossover episode
+# JSON file with TV series that are still treated as crossovers (e.g. Isekai Quartet);
+# empty = the bundled src/main/resources/crossover-exceptions.json
+collection.crossover-exceptions=

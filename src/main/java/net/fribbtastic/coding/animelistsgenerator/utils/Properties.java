@@ -43,4 +43,12 @@ public class Properties {
     public void setCollectionCrossoverTags(String value) {
         collectionCrossoverTags = value;
     }
+
+    /** JSON file with TV series that are still treated as crossovers; empty = bundled crossover-exceptions.json */
+    public static String collectionCrossoverExceptions = "";
+
+    @Value("${collection.crossover-exceptions:}")
+    public void setCollectionCrossoverExceptions(String value) {
+        collectionCrossoverExceptions = value;
+    }
 }

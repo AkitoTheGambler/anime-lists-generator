@@ -3,6 +3,8 @@ package net.fribbtastic.coding.animelistsgenerator.collections;
 import net.fribbtastic.coding.animelistsgenerator.models.AnimeCollection;
 import net.fribbtastic.coding.animelistsgenerator.models.AnimeItem;
 import net.fribbtastic.coding.animelistsgenerator.utils.Properties;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jgrapht.Graph;
 import org.jgrapht.Graphs;
 import org.jgrapht.alg.connectivity.ConnectivityInspector;
@@ -12,6 +14,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -26,6 +32,12 @@ public class CollectionService {
     //   collection.max-degree   (default 0 = no limit)
     //   collection.max-size     (default 300, 0 = no limit)
     //   collection.crossover-tags (default "crossover,crossover episode", empty = off)
+    //   collection.crossover-exceptions (TV series still treated as crossovers; default:
+    //                                   the bundled crossover-exceptions.json)
+
+    private static final String CROSSOVER_EXCEPTIONS_FILE = "crossover-exceptions.json";
+    private static final Set<String> KNOWN_SOURCES = Set.of("anidb", "anilist", "animecountdown", "animenewsnetwork",
+            "anisearch", "kitsu", "livechart", "mal", "simkl");
 
     private static final Comparator<String> MIXED_ID_COMPARATOR = (a, b) -> {
         boolean aNumeric = a.matches("\\d+");
@@ -122,6 +134,8 @@ public class CollectionService {
         }
 
         Set<String> crossoverTags = parseCrossoverTags(Properties.collectionCrossoverTags);
+        Map<String, Set<String>> crossoverExceptions = crossoverTags.isEmpty()
+                ? Map.of() : loadCrossoverExceptions(Properties.collectionCrossoverExceptions);
         int maxDegree = Properties.collectionMaxDegree;
         int maxSize = Properties.collectionMaxSize;
         LOGGER.info("generating collections: max-degree={}, max-size={}, crossover-tags={}",
@@ -136,16 +150,18 @@ public class CollectionService {
             Map<String, AnimeItem> sourceLookup = lookup.get(source);
 
             // Crossover entries (tagged e.g. "crossover") must not bridge two franchises:
-            // remember their neighbours, take them out of the graph, and add them to every
-            // group they are related to afterwards.
+            // remember the neighbours of all of them first (so links between crossover
+            // entries are kept), then take them out of the graph and add them back afterwards.
+            // TV series are not treated as crossovers (they are usually main series with
+            // crossover episodes), except those listed in the crossover exceptions.
             Map<String, List<String>> crossoverNeighbours = new HashMap<>();
             if (!crossoverTags.isEmpty() && sourceLookup != null) {
-                for (String vertex : new ArrayList<>(graph.vertexSet())) {
-                    if (isCrossover(sourceLookup.get(vertex), crossoverTags)) {
+                for (String vertex : graph.vertexSet()) {
+                    if (isCrossover(sourceLookup.get(vertex), crossoverTags, crossoverExceptions)) {
                         crossoverNeighbours.put(vertex, Graphs.neighborListOf(graph, vertex));
-                        graph.removeVertex(vertex);
                     }
                 }
+                crossoverNeighbours.keySet().forEach(graph::removeVertex);
             }
 
             // Remove large nodes to prevent giant clusters
@@ -167,24 +183,80 @@ public class CollectionService {
                 connectedSets.add(copy);
             }
 
-            // Crossover entries are added to every group they are related to (they can
-            // belong to several franchises); with no related group they stay on their own.
+            // Single entries related only to one crossover entry (e.g. its music videos or a
+            // recap) form one group together instead of one group each, named after it.
+            Map<Set<String>, String> namedAfter = new IdentityHashMap<>();
+            Map<String, Set<String>> relatedCrossovers = new HashMap<>();
+            crossoverNeighbours.forEach((crossover, neighbours) ->
+                    neighbours.forEach(n -> relatedCrossovers.computeIfAbsent(n, k -> new HashSet<>()).add(crossover)));
+            for (String crossover : new TreeSet<>(crossoverNeighbours.keySet())) {
+                List<Integer> singles = crossoverNeighbours.get(crossover).stream()
+                        .filter(n -> setOfVertex.containsKey(n)
+                                && connectedSets.get(setOfVertex.get(n)).size() == 1
+                                && relatedCrossovers.get(n).size() == 1)
+                        .map(setOfVertex::get)
+                        .toList();
+                for (int i = 1; i < singles.size(); i++) {
+                    Set<String> single = connectedSets.get(singles.get(i));
+                    single.forEach(v -> setOfVertex.put(v, singles.getFirst()));
+                    connectedSets.get(singles.getFirst()).addAll(single);
+                    single.clear();
+                }
+                if (!singles.isEmpty()) {
+                    namedAfter.put(connectedSets.get(singles.getFirst()), crossover);
+                }
+            }
+
+            // Crossover entries are added to every group they are related to (those groups are
+            // not merged). One related only to other crossover entries gets their groups (one
+            // step, so chains of crossover entries don't spread everywhere). The rest stay
+            // together with the crossover entries they are related to, as a group of their own.
+            Map<String, Set<Integer>> targets = new HashMap<>();
             for (Map.Entry<String, List<String>> crossover : crossoverNeighbours.entrySet()) {
-                Set<Integer> targets = new TreeSet<>();
+                Set<Integer> groups = new TreeSet<>();
                 for (String neighbour : crossover.getValue()) {
                     Integer setIndex = setOfVertex.get(neighbour);
                     if (setIndex != null) {
-                        targets.add(setIndex);
+                        groups.add(setIndex);
                     }
                 }
-                if (targets.isEmpty()) {
-                    connectedSets.add(new HashSet<>(Set.of(crossover.getKey())));
-                } else {
-                    for (Integer target : targets) {
-                        connectedSets.get(target).add(crossover.getKey());
+                targets.put(crossover.getKey(), groups);
+            }
+            Map<String, Set<Integer>> inherited = new HashMap<>();
+            for (Map.Entry<String, Set<Integer>> crossover : targets.entrySet()) {
+                if (crossover.getValue().isEmpty()) {
+                    Set<Integer> groups = new TreeSet<>();
+                    for (String neighbour : crossoverNeighbours.get(crossover.getKey())) {
+                        groups.addAll(targets.getOrDefault(neighbour, Set.of()));
                     }
+                    inherited.put(crossover.getKey(), groups);
                 }
             }
+            targets.putAll(inherited);
+            for (Map.Entry<String, Set<Integer>> crossover : targets.entrySet()) {
+                for (Integer group : crossover.getValue()) {
+                    connectedSets.get(group).add(crossover.getKey());
+                }
+            }
+            Set<String> placed = new HashSet<>();
+            for (String start : new TreeSet<>(targets.keySet())) {
+                if (!targets.get(start).isEmpty() || !placed.add(start)) {
+                    continue;
+                }
+                Set<String> component = new HashSet<>();
+                Deque<String> queue = new ArrayDeque<>(List.of(start));
+                while (!queue.isEmpty()) {
+                    String current = queue.poll();
+                    component.add(current);
+                    for (String neighbour : crossoverNeighbours.get(current)) {
+                        if (targets.containsKey(neighbour) && targets.get(neighbour).isEmpty() && placed.add(neighbour)) {
+                            queue.add(neighbour);
+                        }
+                    }
+                }
+                connectedSets.add(component);
+            }
+            connectedSets.removeIf(Set::isEmpty);
 
             List<AnimeCollection> collections = new ArrayList<>();
             for (Set<String> connectedSet : connectedSets) {
@@ -198,7 +270,10 @@ public class CollectionService {
 
                 // determine the name of the collection (from the group's own entries, not
                 // from crossover entries that were added to it)
-                List<String> naming = sorted.stream().filter(id -> !crossoverNeighbours.containsKey(id)).toList();
+                // (a group of single entries related only to one crossover entry is named after it)
+                List<String> naming = namedAfter.containsKey(connectedSet)
+                        ? List.of(namedAfter.get(connectedSet))
+                        : sorted.stream().filter(id -> !crossoverNeighbours.containsKey(id)).toList();
                 String name = this.determineCollectionName(naming.isEmpty() ? sorted : naming, sourceLookup);
 
                 // convert the ID to the correct format
@@ -231,18 +306,72 @@ public class CollectionService {
     }
 
     /**
-     * is the item tagged as a crossover entry?
+     * is the item a crossover entry? Tagged with one of the crossover tags, and not a TV
+     * series unless it is listed in the crossover exceptions.
      */
-    static boolean isCrossover(AnimeItem item, Set<String> crossoverTags) {
+    static boolean isCrossover(AnimeItem item, Set<String> crossoverTags, Map<String, Set<String>> exceptions) {
         if (item == null || item.getTags() == null) {
             return false;
         }
-        for (String tag : item.getTags()) {
-            if (tag != null && crossoverTags.contains(tag.trim().toLowerCase(Locale.ROOT))) {
-                return true;
+        boolean tagged = item.getTags().stream()
+                .anyMatch(tag -> tag != null && crossoverTags.contains(tag.trim().toLowerCase(Locale.ROOT)));
+        if (!tagged) {
+            return false;
+        }
+        if (!"TV".equalsIgnoreCase(item.getType())) {
+            return true;
+        }
+        for (Map.Entry<String, Set<String>> exception : exceptions.entrySet()) {
+            for (String id : item.getIdForSource(exception.getKey())) {
+                if (exception.getValue().contains(id)) {
+                    return true;
+                }
             }
         }
         return false;
+    }
+
+    /**
+     * Load the TV series that are still treated as crossover entries (e.g. "Isekai Quartet"):
+     * a JSON array of objects with the entry's IDs per source, e.g.
+     * {@code [{"title": "Isekai Quartet", "mal": 38472, "anidb": 14435}]}. "title" is only
+     * for reading; an entry matches when any of its IDs is listed.
+     *
+     * @param location file path, or empty for the bundled crossover-exceptions.json
+     * @return source -> listed IDs
+     */
+    static Map<String, Set<String>> loadCrossoverExceptions(String location) {
+        Map<String, Set<String>> exceptions = new HashMap<>();
+        try (InputStream in = location == null || location.isBlank()
+                ? CollectionService.class.getResourceAsStream("/" + CROSSOVER_EXCEPTIONS_FILE)
+                : Files.newInputStream(Path.of(location))) {
+            if (in == null) {
+                LOGGER.warn("crossover exceptions not found ({}), no TV series is treated as crossover", CROSSOVER_EXCEPTIONS_FILE);
+                return exceptions;
+            }
+            JsonNode root = new ObjectMapper().readTree(in);
+            for (JsonNode entry : root) {
+                for (Map.Entry<String, JsonNode> field : entry.properties()) {
+                    String source = field.getKey();
+                    if (source.equals("title") || !KNOWN_SOURCES.contains(source)) {
+                        continue;
+                    }
+                    List<JsonNode> ids = new ArrayList<>();
+                    if (field.getValue().isArray()) {
+                        field.getValue().forEach(ids::add);
+                    } else {
+                        ids.add(field.getValue());
+                    }
+                    for (JsonNode id : ids) {
+                        exceptions.computeIfAbsent(source, k -> new HashSet<>()).add(id.asText());
+                    }
+                }
+            }
+            LOGGER.info("crossover exceptions: {} TV series", root.size());
+        } catch (IOException e) {
+            LOGGER.warn("could not read crossover exceptions ({}): {}", location, e.getMessage());
+        }
+        return exceptions;
     }
 
     private Object convertId(String id) {
