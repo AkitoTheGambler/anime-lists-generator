@@ -80,6 +80,9 @@ public class AnimeOfflineDatabaseService {
             // set title
             newItem.setTitle(item.getTitle());
 
+            // set the tags (crossover detection for the collections)
+            newItem.setTags(item.getTags());
+
             // set the type
             String type = item.getType();
             newItem.setType(type);

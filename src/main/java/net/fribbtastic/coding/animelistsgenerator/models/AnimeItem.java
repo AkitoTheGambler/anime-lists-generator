@@ -90,6 +90,10 @@ public class AnimeItem {
     @JsonIgnore
     private transient String title;
 
+    /** tags from the anime-offline-database (used to detect crossover entries for collections) */
+    @JsonIgnore
+    private transient List<String> tags;
+
     /**
      * Set the IDs by parsing the individual Source URLs
      *

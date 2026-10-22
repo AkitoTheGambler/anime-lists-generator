@@ -24,4 +24,7 @@ public class AODBItem {
 
     @JsonProperty("title")
     private String title;
+
+    @JsonProperty("tags")
+    private ArrayList<String> tags;
 }

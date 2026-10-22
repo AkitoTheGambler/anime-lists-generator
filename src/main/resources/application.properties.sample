@@ -1,3 +1,12 @@
 spring.application.name=anime-lists-generator
 project.path=
 project.apikey.themoviedb=
+
+# --- collections ---
+# remove entries with more mutual relations than this before grouping (0 = no limit)
+collection.max-degree=0
+# drop groups larger than this (0 = no limit)
+collection.max-size=300
+# tags marking crossover entries: they can't merge two franchises into one group;
+# instead they are added to every group they are related to (empty = off)
+collection.crossover-tags=crossover,crossover episode
