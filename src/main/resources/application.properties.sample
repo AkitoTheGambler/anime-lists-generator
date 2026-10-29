@@ -7,11 +7,11 @@ project.apikey.themoviedb=
 anime-offline-database.file=
 
 # --- collections ---
-# remove entries with more mutual relations than this before grouping (0 = no limit)
-collection.max-degree=0
-# drop groups larger than this (0 = no limit)
-collection.max-size=300
 # kinds of relation that don't join two anime into one collection, as the meta data
 # providers label them (case, "_" and "-" don't matter; empty = every relation joins).
 # Needs an anime-offline-database with relation types in "relatedAnime".
 collection.excluded-relations=crossover,other,shared universe,character
+# put groups which were only cut off by excluded relations (spin-offs, shorts, specials) back into
+# their collection, as long as they touch just that one collection; a group touching several
+# collections (a crossover) stays on its own
+collection.rejoin-single-neighbour=true

@@ -23,9 +23,8 @@ public class CollectionService {
     private static final Logger LOGGER = LoggerFactory.getLogger(CollectionService.class);
 
     // Configurable (application.properties):
-    //   collection.max-degree          (default 0 = no limit)
-    //   collection.max-size            (default 300, 0 = no limit)
     //   collection.excluded-relations  (default "crossover,other,shared universe,character", empty = all relations join)
+    //   collection.rejoin-single-neighbour (default true)
 
     private static final Comparator<String> MIXED_ID_COMPARATOR = (a, b) -> {
         boolean aNumeric = a.matches("\\d+");
@@ -84,6 +83,8 @@ public class CollectionService {
         }
 
         Set<String> excludedRelations = parseExcludedRelations(Properties.collectionExcludedRelations);
+        // mutual relations which were left out of the graph because of their type
+        Map<String, List<String[]>> excludedEdges = new HashMap<>();
 
         // build the graph
         for (AnimeItem anime : animeItems) {
@@ -112,10 +113,10 @@ public class CollectionService {
                     graph.addVertex(relationId);
 
                     for (String selfId : selfIds) {
-                        if (isMutualRelation(lookup.get(source), selfId, relationId)
-                                && !isExcludedRelation(anime, lookup.get(source), source, selfId, relationId, excludedRelations)) {
-                            if (!selfId.equals(relationId))
-                            {
+                        if (isMutualRelation(lookup.get(source), selfId, relationId) && !selfId.equals(relationId)) {
+                            if (isExcludedRelation(anime, lookup.get(source), source, selfId, relationId, excludedRelations)) {
+                                excludedEdges.computeIfAbsent(source, s -> new ArrayList<>()).add(new String[]{selfId, relationId});
+                            } else {
                                 graph.addEdge(selfId, relationId);
                             }
                         }
@@ -124,11 +125,9 @@ public class CollectionService {
             }
         }
 
-        int maxDegree = Properties.collectionMaxDegree;
-        int maxSize = Properties.collectionMaxSize;
-        LOGGER.info("generating collections: max-degree={}, max-size={}, excluded-relations={}",
-                maxDegree > 0 ? maxDegree : "off", maxSize > 0 ? maxSize : "off",
-                excludedRelations.isEmpty() ? "none" : excludedRelations);
+        boolean rejoin = Properties.collectionRejoinSingleNeighbour;
+        LOGGER.info("generating collections: excluded-relations={}, rejoin-single-neighbour={}",
+                excludedRelations.isEmpty() ? "none" : excludedRelations, rejoin);
 
         // extract collections
         Map<String, List<AnimeCollection>> result = new HashMap<>();
@@ -137,22 +136,14 @@ public class CollectionService {
             Graph<String, DefaultEdge> graph = entry.getValue();
             Map<String, AnimeItem> sourceLookup = lookup.get(source);
 
-            // Remove large nodes to prevent giant clusters
-            if (maxDegree > 0) {
-                List<String> toRemove = graph.vertexSet().stream()
-                        .filter(v -> graph.degreeOf(v) > maxDegree)
-                        .toList();
-                toRemove.forEach(graph::removeVertex);
+            ConnectivityInspector<String, DefaultEdge> inspector = new ConnectivityInspector<>(graph);
+            List<Set<String>> connectedSets = inspector.connectedSets();
+            if (rejoin) {
+                connectedSets = rejoinSingleNeighbourGroups(connectedSets, excludedEdges.getOrDefault(source, List.of()));
             }
 
-            ConnectivityInspector<String, DefaultEdge> inspector = new ConnectivityInspector<>(graph);
             List<AnimeCollection> collections = new ArrayList<>();
-            for (Set<String> connectedSet : inspector.connectedSets()) {
-                // skip very large collections
-                if (maxSize > 0 && connectedSet.size() > maxSize) {
-                    continue;
-                }
-
+            for (Set<String> connectedSet : connectedSets) {
                 List<String> sorted = new ArrayList<>(connectedSet);
                 sorted.sort(MIXED_ID_COMPARATOR);
 
@@ -169,6 +160,66 @@ public class CollectionService {
         }
 
         return result;
+    }
+
+    /**
+     * Groups which were only cut off by excluded relations go back into the collection they were cut off from, as
+     * long as there is just one such collection. A group touching several collections through excluded relations
+     * (a crossover, an advert for several franchises) stays on its own.
+     * <p>
+     * A group rejoins its neighbour if it is the only neighbouring group, it is larger and has at least two entries.
+     * The groups are compared as they were before rejoining, so nothing is moved twice: a neighbour which takes in a
+     * group has that group as neighbour too and can't be the smaller one.
+     *
+     * @param groups the connected sets of the graph without the excluded relations
+     * @param excludedEdges the mutual relations left out of the graph because of their type
+     * @return the groups after rejoining
+     */
+    static List<Set<String>> rejoinSingleNeighbourGroups(List<Set<String>> groups, List<String[]> excludedEdges) {
+        Map<String, Integer> groupOf = new HashMap<>();
+        for (int i = 0; i < groups.size(); i++) {
+            for (String id : groups.get(i)) {
+                groupOf.put(id, i);
+            }
+        }
+
+        List<Set<Integer>> neighbours = new ArrayList<>();
+        for (int i = 0; i < groups.size(); i++) {
+            neighbours.add(new HashSet<>());
+        }
+
+        for (String[] edge : excludedEdges) {
+            // both ends are in the graph, the check only guards against a relation to an unknown ID
+            Integer a = groupOf.get(edge[0]);
+            Integer b = groupOf.get(edge[1]);
+            if (a == null || b == null || a.equals(b)) {
+                continue;
+            }
+            neighbours.get(a).add(b);
+            neighbours.get(b).add(a);
+        }
+
+        Map<Integer, Set<String>> merged = new LinkedHashMap<>();
+        int rejoined = 0;
+        for (int i = 0; i < groups.size(); i++) {
+            int target = i;
+            if (neighbours.get(i).size() == 1) {
+                int neighbour = neighbours.get(i).iterator().next();
+                int size = groups.get(i).size();
+                int neighbourSize = groups.get(neighbour).size();
+                if (size < neighbourSize && neighbourSize >= 2) {
+                    target = neighbour;
+                    rejoined++;
+                }
+            }
+            merged.computeIfAbsent(target, k -> new HashSet<>()).addAll(groups.get(i));
+        }
+
+        if (rejoined > 0) {
+            LOGGER.debug("rejoined {} groups with their only neighbouring collection", rejoined);
+        }
+
+        return new ArrayList<>(merged.values());
     }
 
     /**

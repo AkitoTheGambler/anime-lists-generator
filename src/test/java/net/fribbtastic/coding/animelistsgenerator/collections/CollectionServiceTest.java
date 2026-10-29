@@ -22,24 +22,20 @@ import java.util.Map;
 class CollectionServiceTest {
 
     private String excludedRelations;
-    private int maxDegree;
-    private int maxSize;
+    private boolean rejoin;
 
     @BeforeEach
     void saveProperties() {
         this.excludedRelations = Properties.collectionExcludedRelations;
-        this.maxDegree = Properties.collectionMaxDegree;
-        this.maxSize = Properties.collectionMaxSize;
+        this.rejoin = Properties.collectionRejoinSingleNeighbour;
+        Properties.collectionRejoinSingleNeighbour = true;
         Properties.collectionExcludedRelations = "crossover,other,shared universe,character";
-        Properties.collectionMaxDegree = 0;
-        Properties.collectionMaxSize = 300;
     }
 
     @AfterEach
     void restoreProperties() {
         Properties.collectionExcludedRelations = this.excludedRelations;
-        Properties.collectionMaxDegree = this.maxDegree;
-        Properties.collectionMaxSize = this.maxSize;
+        Properties.collectionRejoinSingleNeighbour = this.rejoin;
     }
 
     @Test
@@ -103,6 +99,73 @@ class CollectionServiceTest {
 
         Assertions.assertThat(ids(new CollectionService().generateCollections(items)))
                 .containsExactly(List.of(1, 2));
+    }
+
+    @Test
+    @DisplayName("Test: a group cut off by an excluded relation rejoins its only neighbouring collection")
+    void testRejoinSingleNeighbour() {
+        // 3+4 (a short and its sequel) are only linked to the franchise 1+2 as "Other"
+        List<AnimeItem> items = List.of(
+                mal(1, "A", related(2, "Sequel", 3, "Other")),
+                mal(2, "A 2", related(1, "Prequel", 5, "Sequel")),
+                mal(3, "A Short", related(1, "Other", 4, "Sequel")),
+                mal(4, "A Short 2", related(3, "Prequel")),
+                mal(5, "A 3", related(2, "Prequel")));
+
+        Assertions.assertThat(ids(new CollectionService().generateCollections(items)))
+                .containsExactly(List.of(1, 2, 3, 4, 5));
+    }
+
+    @Test
+    @DisplayName("Test: a group touching several collections through excluded relations stays on its own")
+    void testNoRejoinWithSeveralNeighbours() {
+        // 5 is a crossover of the franchises 1+2 and 3+4, labelled "Other" on one side and "Crossover" on the other
+        List<AnimeItem> items = List.of(
+                mal(1, "A", related(2, "Sequel")),
+                mal(2, "A 2", related(1, "Prequel", 5, "Other")),
+                mal(3, "B", related(4, "Sequel", 5, "Crossover")),
+                mal(4, "B 2", related(3, "Prequel")),
+                mal(5, "A x B", related(2, "Other", 3, "Other")));
+
+        Assertions.assertThat(ids(new CollectionService().generateCollections(items)))
+                .containsExactlyInAnyOrder(List.of(1, 2), List.of(3, 4), List.of(5));
+    }
+
+    @Test
+    @DisplayName("Test: single entries don't rejoin each other")
+    void testNoRejoinIntoSingleEntry() {
+        List<AnimeItem> items = List.of(
+                mal(1, "A", related(2, "Other")),
+                mal(2, "B", related(1, "Other")));
+
+        Assertions.assertThat(ids(new CollectionService().generateCollections(items)))
+                .containsExactlyInAnyOrder(List.of(1), List.of(2));
+    }
+
+    @Test
+    @DisplayName("Test: two collections of the same size linked by an excluded relation stay apart")
+    void testNoRejoinOfEqualSize() {
+        List<AnimeItem> items = List.of(
+                mal(1, "A", related(2, "Sequel")),
+                mal(2, "A 2", related(1, "Prequel", 3, "Other")),
+                mal(3, "B", related(4, "Sequel", 2, "Other")),
+                mal(4, "B 2", related(3, "Prequel")));
+
+        Assertions.assertThat(ids(new CollectionService().generateCollections(items)))
+                .containsExactlyInAnyOrder(List.of(1, 2), List.of(3, 4));
+    }
+
+    @Test
+    @DisplayName("Test: without rejoining, a group cut off by an excluded relation stays on its own")
+    void testRejoinDisabled() {
+        Properties.collectionRejoinSingleNeighbour = false;
+        List<AnimeItem> items = List.of(
+                mal(1, "A", related(2, "Sequel", 3, "Other")),
+                mal(2, "A 2", related(1, "Prequel")),
+                mal(3, "A Short", related(1, "Other")));
+
+        Assertions.assertThat(ids(new CollectionService().generateCollections(items)))
+                .containsExactlyInAnyOrder(List.of(1, 2), List.of(3));
     }
 
     // --- helpers ---

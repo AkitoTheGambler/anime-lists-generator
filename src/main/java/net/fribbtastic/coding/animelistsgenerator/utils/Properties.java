@@ -22,26 +22,20 @@ public class Properties {
         theMovieDbApiKey = apiKey;
     }
 
-    /** Remove entries with more mutual relations than this before grouping (0 = no limit) */
-    public static int collectionMaxDegree = 0;
-    /** Drop collections larger than this (0 = no limit) */
-    public static int collectionMaxSize = 300;
     /** Relations (comma separated, see RelationParser.normalise) that don't join two anime into one collection */
     public static String collectionExcludedRelations = "crossover,other,shared universe,character";
-
-    @Value("${collection.max-degree:0}")
-    public void setCollectionMaxDegree(int value) {
-        collectionMaxDegree = value;
-    }
-
-    @Value("${collection.max-size:300}")
-    public void setCollectionMaxSize(int value) {
-        collectionMaxSize = value;
-    }
 
     @Value("${collection.excluded-relations:crossover,other,shared universe,character}")
     public void setCollectionExcludedRelations(String value) {
         collectionExcludedRelations = value;
+    }
+
+    /** Put groups cut off only by excluded relations back into their collection, if it is the only one they touch */
+    public static boolean collectionRejoinSingleNeighbour = true;
+
+    @Value("${collection.rejoin-single-neighbour:true}")
+    public void setCollectionRejoinSingleNeighbour(boolean value) {
+        collectionRejoinSingleNeighbour = value;
     }
 
     /** Local anime-offline-database-minified.json to read instead of downloading it; empty = download */
