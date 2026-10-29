@@ -90,9 +90,9 @@ public class AnimeItem {
     @JsonIgnore
     private transient String title;
 
-    /** tags from the anime-offline-database (used to detect crossover entries for collections) */
+    /** kind of relation per source and related ID, normalised (see RelationParser), only where the provider names it */
     @JsonIgnore
-    private transient List<String> tags;
+    private transient Map<String, Map<String, String>> relationTypes;
 
     /**
      * Set the IDs by parsing the individual Source URLs

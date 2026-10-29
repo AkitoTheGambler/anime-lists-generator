@@ -26,8 +26,8 @@ public class Properties {
     public static int collectionMaxDegree = 0;
     /** Drop collections larger than this (0 = no limit) */
     public static int collectionMaxSize = 300;
-    /** Tags (case-insensitive, comma separated) marking crossover entries; empty = feature off */
-    public static String collectionCrossoverTags = "crossover,crossover episode";
+    /** Relations (comma separated, see RelationParser.normalise) that don't join two anime into one collection */
+    public static String collectionExcludedRelations = "crossover,other,shared universe,character";
 
     @Value("${collection.max-degree:0}")
     public void setCollectionMaxDegree(int value) {
@@ -39,16 +39,16 @@ public class Properties {
         collectionMaxSize = value;
     }
 
-    @Value("${collection.crossover-tags:crossover,crossover episode}")
-    public void setCollectionCrossoverTags(String value) {
-        collectionCrossoverTags = value;
+    @Value("${collection.excluded-relations:crossover,other,shared universe,character}")
+    public void setCollectionExcludedRelations(String value) {
+        collectionExcludedRelations = value;
     }
 
-    /** JSON file with TV series that are still treated as crossovers; empty = bundled crossover-exceptions.json */
-    public static String collectionCrossoverExceptions = "";
+    /** Local anime-offline-database-minified.json to read instead of downloading it; empty = download */
+    public static String animeOfflineDatabaseFile = "";
 
-    @Value("${collection.crossover-exceptions:}")
-    public void setCollectionCrossoverExceptions(String value) {
-        collectionCrossoverExceptions = value;
+    @Value("${anime-offline-database.file:}")
+    public void setAnimeOfflineDatabaseFile(String value) {
+        animeOfflineDatabaseFile = value;
     }
 }

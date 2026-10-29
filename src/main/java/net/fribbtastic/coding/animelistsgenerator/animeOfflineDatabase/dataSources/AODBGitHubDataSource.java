@@ -6,10 +6,16 @@ import net.fribbtastic.coding.animelistsgenerator.Constants;
 import net.fribbtastic.coding.animelistsgenerator.animeOfflineDatabase.models.AODB;
 import net.fribbtastic.coding.animelistsgenerator.exceptions.NotFoundException;
 import net.fribbtastic.coding.animelistsgenerator.utils.HTTPUtils;
+import net.fribbtastic.coding.animelistsgenerator.utils.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * @author Frederic Eßer
@@ -30,6 +36,17 @@ public class AODBGitHubDataSource implements AnimeOfflineDbDataSource {
 
     @Override
     public AODB loadData() {
+        String file = Properties.animeOfflineDatabaseFile;
+        if (file != null && !file.isBlank()) {
+            LOGGER.info("Loading Data from local file: {}", file);
+
+            try {
+                return this.mapper.readValue(Files.readString(Path.of(file)), AODB.class);
+            } catch (IOException e) {
+                throw new UncheckedIOException("could not read anime-offline-database from " + file, e);
+            }
+        }
+
         LOGGER.info("Loading Data from Source: {}", Constants.ANIMEOFFLINEDB_URL);
 
         try {

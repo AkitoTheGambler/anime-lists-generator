@@ -80,9 +80,6 @@ public class AnimeOfflineDatabaseService {
             // set title
             newItem.setTitle(item.getTitle());
 
-            // set the tags (crossover detection for the collections)
-            newItem.setTags(item.getTags());
-
             // set the type
             String type = item.getType();
             newItem.setType(type);
@@ -90,6 +87,7 @@ public class AnimeOfflineDatabaseService {
             // set the relations
             if (item.getRelatedAnime() != null && !item.getRelatedAnime().isEmpty()) {
                 newItem.setRelations(this.relationParser.parseRelations(item.getRelatedAnime()));
+                newItem.setRelationTypes(this.relationParser.parseRelationTypes(item.getRelatedAnime()));
             }
 
             // add the new Item to the List
