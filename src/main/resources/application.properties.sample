@@ -2,9 +2,14 @@ spring.application.name=anime-lists-generator
 project.path=
 project.apikey.themoviedb=
 
-# --- anime-offline-database ---
-# local anime-offline-database-minified.json to read instead of downloading it (empty = download)
+# --- source data ---
+# true = download anime-offline-database and anime-list-full.xml (saved to <project.path>/source/),
+# false = read the local files below
+data.download=true
+# local anime-offline-database-minified.json (empty = the saved download)
 anime-offline-database.file=
+# local anime-list-full.xml from Anime-Lists (empty = the saved download)
+anime-lists.file=
 
 # --- collections ---
 # kinds of relation that don't join two anime into one collection, as the meta data

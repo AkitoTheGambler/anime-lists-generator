@@ -7,15 +7,11 @@ import net.fribbtastic.coding.animelistsgenerator.animeOfflineDatabase.models.AO
 import net.fribbtastic.coding.animelistsgenerator.exceptions.NotFoundException;
 import net.fribbtastic.coding.animelistsgenerator.utils.HTTPUtils;
 import net.fribbtastic.coding.animelistsgenerator.utils.Properties;
+import net.fribbtastic.coding.animelistsgenerator.utils.SourceFiles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
-
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 /**
  * @author Frederic Eßer
@@ -36,14 +32,13 @@ public class AODBGitHubDataSource implements AnimeOfflineDbDataSource {
 
     @Override
     public AODB loadData() {
-        String file = Properties.animeOfflineDatabaseFile;
-        if (file != null && !file.isBlank()) {
+        String file = Properties.localFile(Properties.animeOfflineDatabaseFile, Constants.ANIMEOFFLINEDB_FILE);
+        if (file != null) {
             LOGGER.info("Loading Data from local file: {}", file);
-
             try {
-                return this.mapper.readValue(Files.readString(Path.of(file)), AODB.class);
-            } catch (IOException e) {
-                throw new UncheckedIOException("could not read anime-offline-database from " + file, e);
+                return this.mapper.readValue(SourceFiles.read(file, "anime-offline-database.file"), AODB.class);
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException("could not parse " + file, e);
             }
         }
 
@@ -51,8 +46,10 @@ public class AODBGitHubDataSource implements AnimeOfflineDbDataSource {
 
         try {
             String response = this.httpUtils.getResponse(Constants.ANIMEOFFLINEDB_URL);
+            AODB data = this.mapper.readValue(response, AODB.class);
+            SourceFiles.save(Constants.ANIMEOFFLINEDB_FILE, response);
 
-            return this.mapper.readValue(response, AODB.class);
+            return data;
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         } catch (NotFoundException e) {
